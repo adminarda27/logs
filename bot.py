@@ -1,35 +1,33 @@
 import os
-import threading
-from flask import Flask
 import discord
 from discord.ext import commands
 from discord import app_commands
 import time
 from collections import defaultdict
 from datetime import timedelta
+from dotenv import load_dotenv
+import threading
 
-# --- Discord Bot トークンは環境変数から取得し、なければ直書きトークンを使用 ---
+load_dotenv()
+
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-
-WELCOME_CHANNEL_ID = 1380106447458664469
-BY_CHANNEL_ID = 1385210506889138196
-AUTH_CHANNEL_ID = 1386183004287795341
-LOG_CHANNEL_ID = 1
-INVITE_TRACK_CHANNEL_ID = 1
+WELCOME_CHANNEL_ID = int(os.getenv('WELCOME_CHANNEL_ID', 0))
+BY_CHANNEL_ID = int(os.getenv('BY_CHANNEL_ID', 0))
+AUTH_CHANNEL_ID = int(os.getenv('AUTH_CHANNEL_ID', 0))
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
+INVITE_TRACK_CHANNEL_ID = int(os.getenv('INVITE_TRACK_CHANNEL_ID', 0))
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents, help_command=None)
 tree = bot.tree
 invite_cache = {}
 
-# スパム検知用変数
+# スパム検知関連
 user_message_times = defaultdict(list)
 user_offenses = defaultdict(int)
 SPAM_THRESHOLD = 5
 SPAM_INTERVAL = 5
 TIMEOUT_DURATIONS = [600, 1200]  # 秒
-
-# --- Discord Bot イベント ---
 
 @bot.event
 async def on_ready():
@@ -190,8 +188,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# --- スラッシュコマンド ---
-
+# スラッシュコマンド群
 @tree.command(name="help", description="Botのコマンド一覧を表示します")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📘 Botコマンド一覧", color=discord.Color.blue())
@@ -229,20 +226,17 @@ async def auth_method_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- Flaskサーバー起動部分（Koyeb用） ---
-
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "Discord Bot is running."
-
-def run_flask():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
 def run_bot():
     bot.run(TOKEN)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
-    run_bot()
+    # Botを別スレッドで起動しつつFlaskを動かす例（Koyebなどで使う場合）
+    import flask
+    app = flask.Flask(__name__)
+
+    @app.route("/")
+    def index():
+        return "Bot is running."
+
+    threading.Thread(target=run_bot).start()
+    app.run(host="0.0.0.0", port=8080)
