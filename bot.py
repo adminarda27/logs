@@ -22,6 +22,7 @@ BY_CHANNEL_ID = get_int_env('BY_CHANNEL_ID')
 AUTH_CHANNEL_ID = get_int_env('AUTH_CHANNEL_ID')
 LOG_CHANNEL_ID = get_int_env('LOG_CHANNEL_ID')
 INVITE_TRACK_CHANNEL_ID = get_int_env('INVITE_TRACK_CHANNEL_ID')
+TEST_GUILD_ID = get_int_env('TEST_GUILD_ID')  # ここでテスト用ギルドIDを取得
 
 if TOKEN is None:
     raise ValueError("環境変数 DISCORD_BOT_TOKEN が設定されていません。")
@@ -41,6 +42,8 @@ TIMEOUT_DURATIONS = [600, 1200]  # 秒
 @bot.event
 async def on_ready():
     print(f"✅ Bot 起動: {bot.user}")
+
+    # 招待リンクキャッシュ初期化
     for guild in bot.guilds:
         try:
             invites = await guild.invites()
@@ -49,9 +52,16 @@ async def on_ready():
             print(f"招待リンクキャッシュ初期化エラー（Guild ID: {guild.id}）: {e}")
             invite_cache[guild.id] = {}
 
-    for guild in bot.guilds:
-        await tree.sync(guild=guild)
-    print("🔄 スラッシュコマンド登録完了")
+    # スラッシュコマンド同期
+    try:
+        if TEST_GUILD_ID:
+            await tree.sync(guild=discord.Object(id=TEST_GUILD_ID))
+            print(f"🔄 スラッシュコマンドをギルド {TEST_GUILD_ID} に同期しました")
+        else:
+            await tree.sync()
+            print("🔄 スラッシュコマンドをグローバル同期しました")
+    except Exception as e:
+        print(f"⚠️ スラッシュコマンド同期エラー: {e}")
 
 @bot.event
 async def on_member_join(member):
