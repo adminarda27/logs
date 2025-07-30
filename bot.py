@@ -10,12 +10,21 @@ import threading
 
 load_dotenv()
 
+def get_int_env(name, default=0):
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-WELCOME_CHANNEL_ID = int(os.getenv('WELCOME_CHANNEL_ID', 0))
-BY_CHANNEL_ID = int(os.getenv('BY_CHANNEL_ID', 0))
-AUTH_CHANNEL_ID = int(os.getenv('AUTH_CHANNEL_ID', 0))
-LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
-INVITE_TRACK_CHANNEL_ID = int(os.getenv('INVITE_TRACK_CHANNEL_ID', 0))
+WELCOME_CHANNEL_ID = get_int_env('WELCOME_CHANNEL_ID')
+BY_CHANNEL_ID = get_int_env('BY_CHANNEL_ID')
+AUTH_CHANNEL_ID = get_int_env('AUTH_CHANNEL_ID')
+LOG_CHANNEL_ID = get_int_env('LOG_CHANNEL_ID')
+INVITE_TRACK_CHANNEL_ID = get_int_env('INVITE_TRACK_CHANNEL_ID')
+
+if TOKEN is None:
+    raise ValueError("環境変数 DISCORD_BOT_TOKEN が設定されていません。")
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents, help_command=None)
@@ -36,7 +45,8 @@ async def on_ready():
         try:
             invites = await guild.invites()
             invite_cache[guild.id] = {invite.code: invite.uses for invite in invites}
-        except:
+        except Exception as e:
+            print(f"招待リンクキャッシュ初期化エラー（Guild ID: {guild.id}）: {e}")
             invite_cache[guild.id] = {}
 
     for guild in bot.guilds:
@@ -230,7 +240,6 @@ def run_bot():
     bot.run(TOKEN)
 
 if __name__ == "__main__":
-    # Botを別スレッドで起動しつつFlaskを動かす例（Koyebなどで使う場合）
     import flask
     app = flask.Flask(__name__)
 
@@ -238,5 +247,5 @@ if __name__ == "__main__":
     def index():
         return "Bot is running."
 
-    threading.Thread(target=run_bot).start()
+    threading.Thread(target=run_bot, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
