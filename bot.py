@@ -11,9 +11,7 @@ TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', 0))
 WELCOME_CHANNEL_ID = int(os.getenv('WELCOME_CHANNEL_ID', 0))
 BY_CHANNEL_ID = int(os.getenv('BY_CHANNEL_ID', 0))
-AUTH_CHANNEL_ID = int(os.getenv('AUTH_CHANNEL_ID', 0))
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', 0))
-INVITE_TRACK_CHANNEL_ID = int(os.getenv('INVITE_TRACK_CHANNEL_ID', 0))
 
 intents = Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -48,19 +46,20 @@ async def on_member_join(member):
             embed.set_footer(text=f"参加日時: {join_time}")
             await channel.send(embed=embed)
 
-    # --- AUTH_CHANNELへの認証案内（DMなし） ---
-    if AUTH_CHANNEL_ID:
-        auth_channel = bot.get_channel(AUTH_CHANNEL_ID)
-        if auth_channel:
-            view = discord.ui.View()
-            view.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
-            embed = discord.Embed(
-                title="🔐 認証が必要です",
-                description=f"{member.mention} 認証がまだ完了していません。下のボタンから認証してください。",
-                color=discord.Color.blurple()
-            )
-            embed.set_footer(text="セキュリティ保護のため認証が必要です。")
-            await auth_channel.send(embed=embed, view=view)
+    # --- DMでのみ認証案内を送信 ---
+    try:
+        dm = await member.create_dm()
+        embed_dm = discord.Embed(
+            title="🔐 認証が必要です",
+            description=f"{member.mention} 認証がまだ完了していません。\n下のボタンから認証してください。",
+            color=discord.Color.blurple()
+        )
+        embed_dm.set_footer(text="セキュリティ保護のため認証が必要です。")
+        view_dm = discord.ui.View()
+        view_dm.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
+        await dm.send(embed=embed_dm, view=view_dm)
+    except discord.Forbidden:
+        print(f"⚠️ {member.name} にDMを送れませんでした。")
 
 @bot.event
 async def on_member_remove(member):
@@ -78,6 +77,7 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_message_delete(message):
+    # ボットのメッセージ削除は無視
     if message.author.bot:
         return
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
