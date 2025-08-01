@@ -32,7 +32,7 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     join_time = datetime.utcnow().strftime('%Y/%m/%d %H:%M:%S')
-    
+
     # --- WELCOME Embed ---
     if WELCOME_CHANNEL_ID:
         channel = bot.get_channel(WELCOME_CHANNEL_ID)
@@ -48,7 +48,7 @@ async def on_member_join(member):
             embed.set_footer(text=f"参加日時: {join_time}")
             await channel.send(embed=embed)
 
-    # --- 認証チャンネルに案内Embed ---
+    # --- AUTH_CHANNELへの認証案内（DMなし） ---
     if AUTH_CHANNEL_ID:
         auth_channel = bot.get_channel(AUTH_CHANNEL_ID)
         if auth_channel:
@@ -56,25 +56,11 @@ async def on_member_join(member):
             view.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
             embed = discord.Embed(
                 title="🔐 認証が必要です",
-                description=f"{member.mention} 下のボタンから認証を進めてください。",
-                color=discord.Color.blue()
+                description=f"{member.mention} 認証がまだ完了していません。下のボタンから認証してください。",
+                color=discord.Color.blurple()
             )
+            embed.set_footer(text="セキュリティ保護のため認証が必要です。")
             await auth_channel.send(embed=embed, view=view)
-
-    # --- DMにようこそメッセージ ---
-    try:
-        dm = await member.create_dm()
-        embed_dm = discord.Embed(
-            title="🌟 ようこそ！",
-            description=f"{member.name}さん、**○○サーバー**へようこそ！\n\n下のボタンから認証を完了してください。",
-            color=discord.Color.purple()
-        )
-        embed_dm.set_footer(text="あなたの参加を歓迎します！")
-        view_dm = discord.ui.View()
-        view_dm.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
-        await dm.send(embed=embed_dm, view=view_dm)
-    except discord.Forbidden:
-        print(f"⚠️ {member.name} にDMを送れませんでした。")
 
 @bot.event
 async def on_member_remove(member):
@@ -82,12 +68,12 @@ async def on_member_remove(member):
         channel = bot.get_channel(BY_CHANNEL_ID)
         if channel:
             embed = discord.Embed(
-                title="👋 メンバーが退出しました",
-                description=f"{member.name}#{member.discriminator} がサーバーを退出しました。",
-                color=discord.Color.red()
+                title="😢 さようなら、また会う日まで。",
+                description=f"**{member.name}#{member.discriminator}** さんがサーバーを退出しました。",
+                color=discord.Color.dark_red()
             )
             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-            embed.set_footer(text=f"ID: {member.id}")
+            embed.set_footer(text=f"ID: {member.id}｜退会時刻: {datetime.utcnow().strftime('%Y/%m/%d %H:%M:%S')}")
             await channel.send(embed=embed)
 
 @bot.event
@@ -118,9 +104,9 @@ async def on_member_update(before, after):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     added_roles = [r for r in after.roles if r not in before.roles]
     removed_roles = [r for r in before.roles if r not in after.roles]
-    if added_roles:
+    if added_roles and log_channel:
         await log_channel.send(f"✅ {after.mention} にロール追加: {', '.join([r.name for r in added_roles])}")
-    if removed_roles:
+    if removed_roles and log_channel:
         await log_channel.send(f"❌ {after.mention} からロール削除: {', '.join([r.name for r in removed_roles])}")
 
 # -----------------------------
