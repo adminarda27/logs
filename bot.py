@@ -121,7 +121,7 @@ async def rule_command(interaction: discord.Interaction):
 @bot.tree.command(name="認証", description="認証を案内します", guild=discord.Object(id=GUILD_ID))
 async def auth_command(interaction: discord.Interaction):
     view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
+    view.add_item(discord.ui.Button(label="認証する", style=discord.ButtonStyle.link, url="https://jaf-ruan.onrender.com/"))
     await interaction.response.send_message("以下のボタンから認証を進めてください：", view=view, ephemeral=True)
 
 bot.run(TOKEN)
