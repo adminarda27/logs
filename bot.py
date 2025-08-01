@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands, Intents
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -30,23 +31,64 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
+    join_time = datetime.utcnow().strftime('%Y/%m/%d %H:%M:%S')
+    
+    # --- WELCOME Embed ---
     if WELCOME_CHANNEL_ID:
         channel = bot.get_channel(WELCOME_CHANNEL_ID)
         if channel:
-            await channel.send(f"🎉 ようこそ {member.mention}！")
+            embed = discord.Embed(
+                title="🎉 新しいメンバーが参加！",
+                description=f"{member.mention} ようこそサーバーへ！",
+                color=discord.Color.green()
+            )
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            embed.add_field(name="ユーザー名", value=f"{member.name}#{member.discriminator}", inline=True)
+            embed.add_field(name="ID", value=member.id, inline=True)
+            embed.set_footer(text=f"参加日時: {join_time}")
+            await channel.send(embed=embed)
+
+    # --- 認証チャンネルに案内Embed ---
     if AUTH_CHANNEL_ID:
-        channel = bot.get_channel(AUTH_CHANNEL_ID)
-        if channel:
+        auth_channel = bot.get_channel(AUTH_CHANNEL_ID)
+        if auth_channel:
             view = discord.ui.View()
-            view.add_item(discord.ui.Button(label="認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
-            await channel.send(f"{member.mention} 認証を完了してください。", view=view)
+            view.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
+            embed = discord.Embed(
+                title="🔐 認証が必要です",
+                description=f"{member.mention} 下のボタンから認証を進めてください。",
+                color=discord.Color.blue()
+            )
+            await auth_channel.send(embed=embed, view=view)
+
+    # --- DMにようこそメッセージ ---
+    try:
+        dm = await member.create_dm()
+        embed_dm = discord.Embed(
+            title="🌟 ようこそ！",
+            description=f"{member.name}さん、**○○サーバー**へようこそ！\n\n下のボタンから認証を完了してください。",
+            color=discord.Color.purple()
+        )
+        embed_dm.set_footer(text="あなたの参加を歓迎します！")
+        view_dm = discord.ui.View()
+        view_dm.add_item(discord.ui.Button(label="✅ 認証する", style=discord.ButtonStyle.link, url="https://your-auth-link.com"))
+        await dm.send(embed=embed_dm, view=view_dm)
+    except discord.Forbidden:
+        print(f"⚠️ {member.name} にDMを送れませんでした。")
 
 @bot.event
 async def on_member_remove(member):
     if BY_CHANNEL_ID:
         channel = bot.get_channel(BY_CHANNEL_ID)
         if channel:
-            await channel.send(f"👋 {member.name} が退出しました。")
+            embed = discord.Embed(
+                title="👋 メンバーが退出しました",
+                description=f"{member.name}#{member.discriminator} がサーバーを退出しました。",
+                color=discord.Color.red()
+            )
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            embed.set_footer(text=f"ID: {member.id}")
+            await channel.send(embed=embed)
 
 @bot.event
 async def on_message_delete(message):
