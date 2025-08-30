@@ -1,24 +1,24 @@
+import os
+import json
 import discord
 from discord.ext import commands
 from discord import app_commands
-import time
 from collections import defaultdict
 from datetime import timedelta
-import json
-import os
+import time
 from dotenv import load_dotenv
 
-# -----------------------------
-# 環境変数読み込み
-# -----------------------------
+# .env ロード（ローカル用）
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
 
-# -----------------------------
-# 設定ファイル
-# -----------------------------
+# BOTトークン
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise ValueError("DISCORD_TOKEN が設定されていません")
+
 CONFIG_FILE = "guild_config.json"
 
+# 設定の保存・読み込み
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -27,40 +27,25 @@ def load_config():
 
 def save_config(data):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 guild_config = load_config()
 
-def get_channel(guild_id, key):
-    cid = guild_config.get(str(guild_id), {}).get(key)
-    if cid:
-        return bot.get_channel(cid)
-    return None
-
-# -----------------------------
-# Bot本体
-# -----------------------------
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents, help_command=None)
 tree = bot.tree
-
-# -----------------------------
-# 招待リンクキャッシュ
-# -----------------------------
 invite_cache = {}
 
-# -----------------------------
-# スパム検知
-# -----------------------------
-user_message_times = defaultdict(lambda: defaultdict(list))  # guild_id -> user_id -> [times]
-user_offenses = defaultdict(lambda: defaultdict(int))        # guild_id -> user_id -> offenses
+# スパム関連
+user_message_times = defaultdict(list)
+user_offenses = defaultdict(int)
 SPAM_THRESHOLD = 5
 SPAM_INTERVAL = 5
-TIMEOUT_DURATIONS = [600, 1200]  # 秒
+TIMEOUT_DURATIONS = [600, 1200]
 
-# -----------------------------
+# --------------------------
 # 起動処理
-# -----------------------------
+# --------------------------
 @bot.event
 async def on_ready():
     print(f"✅ Bot 起動: {bot.user}")
@@ -70,51 +55,49 @@ async def on_ready():
             invite_cache[guild.id] = {invite.code: invite.uses for invite in invites}
         except:
             invite_cache[guild.id] = {}
-    # ギルドごとにスラッシュコマンド同期
-    for guild in bot.guilds:
         await tree.sync(guild=guild)
     print("🔄 スラッシュコマンド登録完了")
 
-# -----------------------------
-# メンバー参加
-# -----------------------------
+# --------------------------
+# メンバー参加・退出
+# --------------------------
 @bot.event
 async def on_member_join(member):
-    guild_id = member.guild.id
-    welcome_channel = get_channel(guild_id, "welcome")
-    if welcome_channel:
+    config = guild_config.get(str(member.guild.id), {})
+    welcome_channel = bot.get_channel(config.get("welcome_channel"))
+    auth_channel_id = config.get("auth_channel")
+    invite_channel = bot.get_channel(config.get("invite_track_channel"))
+    log_channel = bot.get_channel(config.get("log_channel"))
+
+    # 参加メッセージ
+    if welcome_channel and welcome_channel.permissions_for(member.guild.me).send_messages:
         embed = discord.Embed(
-            title="🎮 ようこそ、新たなコミュニティーへ！",
-            description=(f"{member.mention} がサーバーに参加しました！\n\n"
-                         f"🧑‍💻 **表示名**： `{member.display_name}`\n"
-                         f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`\n\n"
-                         f"🔐 認証は <#{get_channel(guild_id, 'auth').id}> をご利用ください。"),
+            title="🎮 ようこそ！",
+            description=f"{member.mention} が参加しました！\n表示名: `{member.display_name}`\nユーザータグ: `{member.name}#{member.discriminator}`\n認証は <#{auth_channel_id}> へ",
             color=discord.Color.green()
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
         await welcome_channel.send(embed=embed)
 
-    # 招待リンク追跡
-    invite_channel = get_channel(guild_id, "invite")
+    # 招待追跡
     try:
-        invites_before = invite_cache.get(guild_id, {})
+        invites_before = invite_cache.get(member.guild.id, {})
         invites_after = await member.guild.invites()
         used_invite = next(
             (invite for invite in invites_after if invites_before.get(invite.code, 0) < invite.uses),
             None
         )
-        invite_cache[guild_id] = {invite.code: invite.uses for invite in invites_after}
+        invite_cache[member.guild.id] = {invite.code: invite.uses for invite in invites_after}
         if invite_channel:
             if used_invite:
-                await invite_channel.send(f"📨 {member.mention} は `{used_invite.inviter}` の招待リンク（`{used_invite.code}`）で参加しました。")
+                await invite_channel.send(f"📨 {member.mention} は `{used_invite.inviter}` の招待リンクで参加")
             else:
-                await invite_channel.send(f"📨 {member.mention} の招待元は特定できませんでした。")
+                await invite_channel.send(f"📨 {member.mention} の招待元は特定できませんでした")
     except Exception as e:
         if invite_channel:
             await invite_channel.send(f"⚠️ 招待追跡失敗: {str(e)}")
 
-    # ログ
-    log_channel = get_channel(guild_id, "log")
+    # ログ送信
     if log_channel:
         embed = discord.Embed(title="🟢 メンバー参加", color=discord.Color.green())
         embed.add_field(name="名前", value=f"{member}", inline=True)
@@ -122,25 +105,21 @@ async def on_member_join(member):
         embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
         await log_channel.send(embed=embed)
 
-# -----------------------------
-# メンバー退出
-# -----------------------------
 @bot.event
 async def on_member_remove(member):
-    guild_id = member.guild.id
-    by_channel = get_channel(guild_id, "bye")
+    config = guild_config.get(str(member.guild.id), {})
+    by_channel = bot.get_channel(config.get("bye_channel"))
+    log_channel = bot.get_channel(config.get("log_channel"))
+
     if by_channel:
         embed = discord.Embed(
-            title="📡 ユーザーがログアウトしました。",
-            description=(f"`{member.display_name}` がサーバーを退出しました。\n\n"
-                         f" **表示名**： `{member.display_name}`\n"
-                         f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"),
+            title="📡 ユーザー退出",
+            description=f"`{member.display_name}` が退出しました\n表示名: `{member.display_name}`\nユーザータグ: `{member.name}#{member.discriminator}`",
             color=discord.Color.red()
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
         await by_channel.send(embed=embed)
 
-    log_channel = get_channel(guild_id, "log")
     if log_channel:
         embed = discord.Embed(title="🔴 メンバー退出", color=discord.Color.red())
         embed.add_field(name="名前", value=f"{member}", inline=True)
@@ -148,14 +127,15 @@ async def on_member_remove(member):
         embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
         await log_channel.send(embed=embed)
 
-# -----------------------------
-# メッセージ削除・編集ログ
-# -----------------------------
+# --------------------------
+# メッセージ編集/削除ログ
+# --------------------------
 @bot.event
 async def on_message_delete(message):
-    if not message.guild or message.author.bot:
+    if message.guild is None or (message.author.bot and not message.content):
         return
-    log_channel = get_channel(message.guild.id, "log")
+    config = guild_config.get(str(message.guild.id), {})
+    log_channel = bot.get_channel(config.get("log_channel"))
     if log_channel:
         embed = discord.Embed(title="🗑️ メッセージ削除", color=discord.Color.orange())
         embed.add_field(name="ユーザー", value=f"{message.author} (`{message.author.id}`)", inline=False)
@@ -167,7 +147,8 @@ async def on_message_delete(message):
 async def on_message_edit(before, after):
     if before.author.bot or before.content == after.content:
         return
-    log_channel = get_channel(before.guild.id, "log")
+    config = guild_config.get(str(before.guild.id), {})
+    log_channel = bot.get_channel(config.get("log_channel"))
     if log_channel:
         embed = discord.Embed(title="✏️ メッセージ編集", color=discord.Color.blue())
         embed.add_field(name="ユーザー", value=f"{before.author} (`{before.author.id}`)", inline=False)
@@ -176,25 +157,22 @@ async def on_message_edit(before, after):
         embed.set_footer(text=f"チャンネル: #{before.channel.name}")
         await log_channel.send(embed=embed)
 
-# -----------------------------
+# --------------------------
 # スパム検知
-# -----------------------------
+# --------------------------
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    guild_id = message.guild.id
-    user_id = message.author.id
     now = time.time()
-    timestamps = user_message_times[guild_id][user_id]
+    timestamps = user_message_times[message.author.id]
     timestamps.append(now)
-    user_message_times[guild_id][user_id] = [t for t in timestamps if now - t <= SPAM_INTERVAL]
+    user_message_times[message.author.id] = [t for t in timestamps if now - t <= SPAM_INTERVAL]
 
-    if len(user_message_times[guild_id][user_id]) >= SPAM_THRESHOLD:
-        offenses = user_offenses[guild_id][user_id]
+    if len(user_message_times[message.author.id]) >= SPAM_THRESHOLD:
+        offenses = user_offenses[message.author.id]
         member = message.author
-
         try:
             await message.delete()
             if offenses < 2:
@@ -202,110 +180,90 @@ async def on_message(message):
                 await member.timeout(discord.utils.utcnow() + timedelta(seconds=duration),
                                      reason=f"{offenses+1}回目のスパム検出")
                 try:
-                    await member.send(f"スパム行為が検出されました（{offenses+1}回目）\n⏱ タイムアウト：{duration//60}分\n今後繰り返すとBANされます。")
-                except:
-                    pass
+                    await member.send(f"スパム行為が検出されました（{offenses+1}回目）\n⏱ タイムアウト: {duration//60}分")
+                except: pass
             else:
-                try:
-                    await member.send("🚫 最終警告：スパムが3回検出されたため、あなたはサーバーからBANされました。")
-                except:
-                    pass
+                try: await member.send("🚫 スパム3回で自動BAN")
+                except: pass
                 await message.guild.ban(member, reason="スパム3回による自動BAN")
-
         except Exception as e:
             print(f"[スパム処理エラー] {e}")
 
-        user_offenses[guild_id][user_id] += 1
-        user_message_times[guild_id][user_id] = []
+        user_offenses[member.id] += 1
+        user_message_times[member.id] = []
 
     await bot.process_commands(message)
 
-# -----------------------------
-# 設定コマンド（サーバーごと）
-# -----------------------------
-@tree.command(name="set_welcome", description="ウェルカムチャンネルを設定")
-@app_commands.describe(channel="ウェルカムチャンネルを指定")
-async def set_welcome(interaction: discord.Interaction, channel: discord.TextChannel):
-    guild_id = str(interaction.guild.id)
-    guild_config.setdefault(guild_id, {})["welcome"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ ウェルカムチャンネルを {channel.mention} に設定しました。", ephemeral=True)
+# --------------------------
+# 管理者コマンド: チャンネル設定
+# --------------------------
+@tree.command(name="設定", description="サーバーのBOTチャンネルを設定")
+@app_commands.describe(種類="welcome/bye/auth/log/invite", チャンネル="設定するチャンネル")
+async def set_channel(interaction: discord.Interaction, 種類: str, チャンネル: discord.TextChannel):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("管理者権限が必要です", ephemeral=True)
+        return
 
-@tree.command(name="set_bye", description="退出通知チャンネルを設定")
-@app_commands.describe(channel="退出通知チャンネルを指定")
-async def set_bye(interaction: discord.Interaction, channel: discord.TextChannel):
     guild_id = str(interaction.guild.id)
-    guild_config.setdefault(guild_id, {})["bye"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 退出通知チャンネルを {channel.mention} に設定しました。", ephemeral=True)
+    if guild_id not in guild_config:
+        guild_config[guild_id] = {}
+    key_map = {
+        "welcome": "welcome_channel",
+        "bye": "bye_channel",
+        "auth": "auth_channel",
+        "log": "log_channel",
+        "invite": "invite_track_channel"
+    }
+    key = key_map.get(種類.lower())
+    if not key:
+        await interaction.response.send_message("種類は welcome/bye/auth/log/invite から選択してください", ephemeral=True)
+        return
 
-@tree.command(name="set_auth", description="認証案内チャンネルを設定")
-@app_commands.describe(channel="認証案内チャンネルを指定")
-async def set_auth(interaction: discord.Interaction, channel: discord.TextChannel):
-    guild_id = str(interaction.guild.id)
-    guild_config.setdefault(guild_id, {})["auth"] = channel.id
+    guild_config[guild_id][key] = チャンネル.id
     save_config(guild_config)
-    await interaction.response.send_message(f"✅ 認証案内チャンネルを {channel.mention} に設定しました。", ephemeral=True)
+    await interaction.response.send_message(f"{種類} チャンネルを {チャンネル.mention} に設定しました", ephemeral=True)
 
-@tree.command(name="set_log", description="ログチャンネルを設定")
-@app_commands.describe(channel="ログチャンネルを指定")
-async def set_log(interaction: discord.Interaction, channel: discord.TextChannel):
-    guild_id = str(interaction.guild.id)
-    guild_config.setdefault(guild_id, {})["log"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ ログチャンネルを {channel.mention} に設定しました。", ephemeral=True)
-
-@tree.command(name="set_invite", description="招待追跡チャンネルを設定")
-@app_commands.describe(channel="招待追跡チャンネルを指定")
-async def set_invite(interaction: discord.Interaction, channel: discord.TextChannel):
-    guild_id = str(interaction.guild.id)
-    guild_config.setdefault(guild_id, {})["invite"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 招待追跡チャンネルを {channel.mention} に設定しました。", ephemeral=True)
-
-# -----------------------------
-# ヘルプ・ルール・警告回数
-# -----------------------------
-@tree.command(name="help", description="Botのコマンド一覧")
+# --------------------------
+# スラッシュコマンド: ヘルプ
+# --------------------------
+@tree.command(name="help", description="Botコマンド一覧")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📘 Botコマンド一覧", color=discord.Color.blue())
     embed.add_field(name="/ルール", value="スパムルールの説明", inline=False)
-    embed.add_field(name="/警告回数", value="自分または指定ユーザーの警告回数を確認", inline=False)
+    embed.add_field(name="/警告回数", value="自分または指定ユーザーの警告回数確認", inline=False)
     embed.add_field(name="/認証方法", value="認証方法の案内", inline=False)
-    embed.set_footer(text="※ メッセージ欄に / を打つと候補が出ます")
+    embed.add_field(name="/設定", value="管理者向け: サーバーでBOTチャンネル設定", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="ルール", description="スパムルールの説明")
+# --------------------------
+# スラッシュコマンド: ルール・警告・認証
+# --------------------------
+@tree.command(name="ルール", description="スパムルールについて")
 async def rules_command(interaction: discord.Interaction):
-    embed = discord.Embed(title="🚨 スパムルールについて", color=discord.Color.red())
-    embed.description = (
-        f"同じ内容を短時間に複数回送信するとスパム判定されます。\n"
-        f"{SPAM_THRESHOLD}回以上連続で送ると自動削除・タイムアウト処理が行われます。\n"
-        f"1回目: {TIMEOUT_DURATIONS[0]//60}分 2回目: {TIMEOUT_DURATIONS[1]//60}分 3回目: BAN\n"
-    )
+    embed = discord.Embed(title="🚨 スパムルール", color=discord.Color.red())
+    embed.description = f"{SPAM_THRESHOLD}回以上連続送信で自動削除、1回目{TIMEOUT_DURATIONS[0]//60}分、2回目{TIMEOUT_DURATIONS[1]//60}分、3回目でBAN"
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="警告回数", description="警告回数を確認")
-@app_commands.describe(member="ユーザーを指定（省略可）")
+@tree.command(name="警告回数", description="警告回数確認")
+@app_commands.describe(member="確認したいユーザー")
 async def offenses_command(interaction: discord.Interaction, member: discord.Member = None):
-    guild_id = interaction.guild.id
     if member is None:
         member = interaction.user
-    count = user_offenses[guild_id].get(member.id, 0)
-    await interaction.response.send_message(f"{member.mention} の警告回数は {count} 回です。", ephemeral=True)
+    count = user_offenses.get(member.id, 0)
+    await interaction.response.send_message(f"{member.mention} の警告回数は {count} 回です", ephemeral=True)
 
-@tree.command(name="認証方法", description="認証方法の案内")
+@tree.command(name="認証方法", description="認証の案内")
 async def auth_method_command(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    auth_channel = get_channel(guild_id, "auth")
+    guild_id = str(interaction.guild.id)
+    auth_channel_id = guild_config.get(guild_id, {}).get("auth_channel")
     embed = discord.Embed(title="🔐 認証方法", color=discord.Color.green())
-    if auth_channel:
-        embed.description = f"認証は <#{auth_channel.id}> チャンネルで案内しています。"
+    if auth_channel_id:
+        embed.description = f"認証は <#{auth_channel_id}> で案内しています"
     else:
-        embed.description = "認証チャンネルが設定されていません。管理者に問い合わせてください。"
+        embed.description = "管理者が認証チャンネルを設定していません"
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# -----------------------------
-# Bot起動
-# -----------------------------
+# --------------------------
+# BOT起動
+# --------------------------
 bot.run(TOKEN)
