@@ -12,8 +12,11 @@ CONFIG_FILE = "guild_config.json"
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {}
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
 
 def save_config(data):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -49,7 +52,7 @@ async def on_ready():
 @bot.tree.command(name="set_welcome", description="ウェルカムチャンネルを設定")
 async def set_welcome(interaction: discord.Interaction, channel: discord.TextChannel):
     gid = str(interaction.guild.id)
-    guild_config[gid] = guild_config.get(gid, {})
+    guild_config.setdefault(gid, {})
     guild_config[gid]["welcome"] = channel.id
     save_config(guild_config)
     await interaction.response.send_message(f"✅ {channel.mention} をウェルカムチャンネルに設定しました！", ephemeral=True)
@@ -58,34 +61,58 @@ async def set_welcome(interaction: discord.Interaction, channel: discord.TextCha
 @bot.tree.command(name="set_bye", description="退出メッセージのチャンネルを設定")
 async def set_bye(interaction: discord.Interaction, channel: discord.TextChannel):
     gid = str(interaction.guild.id)
-    guild_config[gid] = guild_config.get(gid, {})
+    guild_config.setdefault(gid, {})
     guild_config[gid]["bye"] = channel.id
     save_config(guild_config)
     await interaction.response.send_message(f"✅ {channel.mention} を退出チャンネルに設定しました！", ephemeral=True)
 
 
-@bot.tree.command(name="set_welcome_message", description="参加メッセージを設定")
+@bot.tree.command(name="set_welcome_message", description="参加メッセージを設定（{user}, {mention}, {server} 使えます）")
 async def set_welcome_message(interaction: discord.Interaction, message: str):
     gid = str(interaction.guild.id)
-    guild_config[gid] = guild_config.get(gid, {})
+    guild_config.setdefault(gid, {})
     guild_config[gid]["welcome_msg"] = message
     save_config(guild_config)
     await interaction.response.send_message(f"✅ 参加メッセージを設定しました！\n内容: `{message}`", ephemeral=True)
 
 
-@bot.tree.command(name="set_bye_message", description="退出メッセージを設定")
+@bot.tree.command(name="set_bye_message", description="退出メッセージを設定（{user}, {mention}, {server} 使えます）")
 async def set_bye_message(interaction: discord.Interaction, message: str):
     gid = str(interaction.guild.id)
-    guild_config[gid] = guild_config.get(gid, {})
+    guild_config.setdefault(gid, {})
     guild_config[gid]["bye_msg"] = message
     save_config(guild_config)
     await interaction.response.send_message(f"✅ 退出メッセージを設定しました！\n内容: `{message}`", ephemeral=True)
 
 
 # -----------------------
+# ヘルプコマンド
+# -----------------------
+@bot.tree.command(name="help", description="BOTの使い方を表示します")
+async def help_cmd(interaction: discord.Interaction):
+    help_text = (
+        "📘 **BOTの使い方**\n\n"
+        "🔹 `/set_welcome #チャンネル` → 参加メッセージを送るチャンネルを設定\n"
+        "🔹 `/set_bye #チャンネル` → 退出メッセージを送るチャンネルを設定\n"
+        "🔹 `/set_welcome_message メッセージ` → 参加メッセージを設定\n"
+        "🔹 `/set_bye_message メッセージ` → 退出メッセージを設定\n\n"
+        "📝 メッセージ内では以下のタグが使えます:\n"
+        "・`{user}` → ユーザー名\n"
+        "・`{mention}` → メンション (@ユーザー)\n"
+        "・`{server}` → サーバー名\n\n"
+        "例: `ようこそ {mention} さん！{server} へ！`"
+    )
+    embed = discord.Embed(
+        title="📖 BOT ヘルプ",
+        description=help_text,
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# -----------------------
 # イベント
 # -----------------------
-
 def format_message(template: str, member: discord.Member) -> str:
     return (
         template.replace("{user}", member.name)
@@ -122,4 +149,7 @@ async def on_member_remove(member: discord.Member):
 # -----------------------
 # 起動
 # -----------------------
-bot.run(TOKEN)
+if __name__ == "__main__":
+    if not TOKEN:
+        raise ValueError("❌ BOT_TOKEN が設定されていません。Render の Environment Variables に BOT_TOKEN を追加してください。")
+    bot.run(TOKEN)
