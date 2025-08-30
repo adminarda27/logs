@@ -1,8 +1,9 @@
-import json
-import os
+import discord
 from discord.ext import commands
 from discord import app_commands
-import discord
+import time
+from collections import defaultdict
+from datetime import timedelta
 
 CONFIG_FILE = "guild_config.json"
 
@@ -57,24 +58,22 @@ async def set_log(interaction: discord.Interaction, channel: discord.TextChannel
 # 設定を使って通知する例
 # ========================
 @bot.event
-async def on_member_join(member: discord.Member):
-    gid = str(member.guild.id)
-    config = guild_config.get(gid, {})
-    ch_id = config.get("welcome")
-    if ch_id:
-        channel = member.guild.get_channel(ch_id)
-        if channel:
-            await channel.send(f"🎉 ようこそ {member.mention} さん！")
-
-@bot.event
-async def on_member_remove(member: discord.Member):
-    gid = str(member.guild.id)
-    config = guild_config.get(gid, {})
-    ch_id = config.get("bye")
-    if ch_id:
-        channel = member.guild.get_channel(ch_id)
-        if channel:
-            await channel.send(f"😢 {member} さんが退出しました。")
+async def on_member_remove(member):
+    by_channel = bot.get_channel(BY_CHANNEL_ID)
+    if by_channel:
+        embed = discord.Embed(
+            title="📡 ユーザーがログアウトしました。",
+            description=(
+                f"`{member.display_name}` がサーバーを退出しました。\n\n"
+                f" **表示名**： `{member.display_name}`\n"
+                f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"
+            ),
+            color=discord.Color.red()
+        )
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+        embed.set_image(url="https://media.tenor.com/_1HZ7ZDKazUAAAAd/disconnected-signal.gif")
+        embed.set_footer(text="📤 Disconnected by black_ルアン")
+        await by_channel.send(embed=embed)
 
 async def send_log(guild: discord.Guild, msg: str):
     gid = str(guild.id)
