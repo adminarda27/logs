@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import os
+import json
 import time
 from collections import defaultdict
 from datetime import timedelta
@@ -27,58 +29,55 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ========================
 # 設定コマンド
 # ========================
+async def set_channel(interaction: discord.Interaction, key: str, channel: discord.TextChannel, name: str):
+    gid = str(interaction.guild.id)
+    guild_config.setdefault(gid, {})
+    guild_config[gid][key] = channel.id
+    save_config(guild_config)
+    await interaction.response.send_message(f"✅ {name} を {channel.mention} に設定しました。", ephemeral=True)
+
 @bot.tree.command(name="set_welcome", description="参加通知チャンネルを設定します")
 @app_commands.describe(channel="参加通知を送るチャンネル")
 async def set_welcome(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    guild_config.setdefault(gid, {})
-    guild_config[gid]["welcome"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 参加通知チャンネルを {channel.mention} に設定しました。", ephemeral=True)
+    await set_channel(interaction, "welcome", channel, "参加通知チャンネル")
 
 @bot.tree.command(name="set_bye", description="退出通知チャンネルを設定します")
 @app_commands.describe(channel="退出通知を送るチャンネル")
 async def set_bye(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    guild_config.setdefault(gid, {})
-    guild_config[gid]["bye"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 退出通知チャンネルを {channel.mention} に設定しました。", ephemeral=True)
+    await set_channel(interaction, "bye", channel, "退出通知チャンネル")
 
 @bot.tree.command(name="set_log", description="ログチャンネルを設定します")
 @app_commands.describe(channel="ログを送るチャンネル")
 async def set_log(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    guild_config.setdefault(gid, {})
-    guild_config[gid]["log"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ ログチャンネルを {channel.mention} に設定しました。", ephemeral=True)
+    await set_channel(interaction, "log", channel, "ログチャンネル")
 
 # ========================
-# 設定を使って通知する例
+# イベント
 # ========================
 @bot.event
-async def on_member_remove(member):
-    by_channel = bot.get_channel(BY_CHANNEL_ID)
-    if by_channel:
-        embed = discord.Embed(
-            title="📡 ユーザーがログアウトしました。",
-            description=(
-                f"`{member.display_name}` がサーバーを退出しました。\n\n"
-                f" **表示名**： `{member.display_name}`\n"
-                f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"
-            ),
-            color=discord.Color.red()
-        )
-        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-        embed.set_image(url="https://media.tenor.com/_1HZ7ZDKazUAAAAd/disconnected-signal.gif")
-        embed.set_footer(text="📤 Disconnected by black_ルアン")
-        await by_channel.send(embed=embed)
+async def on_member_remove(member: discord.Member):
+    gid = str(member.guild.id)
+    ch_id = guild_config.get(gid, {}).get("bye")
+    if ch_id:
+        by_channel = member.guild.get_channel(ch_id)
+        if by_channel:
+            embed = discord.Embed(
+                title="📡 ユーザーがログアウトしました。",
+                description=(
+                    f"`{member.display_name}` がサーバーを退出しました。\n\n"
+                    f" **表示名**： `{member.display_name}`\n"
+                    f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"
+                ),
+                color=discord.Color.red()
+            )
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            embed.set_image(url="https://media.tenor.com/_1HZ7ZDKazUAAAAd/disconnected-signal.gif")
+            embed.set_footer(text="📤 Disconnected by black_ルアン")
+            await by_channel.send(embed=embed)
 
 async def send_log(guild: discord.Guild, msg: str):
     gid = str(guild.id)
-    config = guild_config.get(gid, {})
-    ch_id = config.get("log")
+    ch_id = guild_config.get(gid, {}).get("log")
     if ch_id:
         channel = guild.get_channel(ch_id)
         if channel:
