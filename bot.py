@@ -1,11 +1,11 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 import json
 
 CONFIG_FILE = "guild_config.json"
 
-# --- 設定を保存・読み込みする関数 ---
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -18,14 +18,12 @@ def save_config(data):
 
 guild_config = load_config()
 
-# --- Discord BOT ---
 intents = discord.Intents.default()
 intents.members = True
-intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# --- サーバー参加時（ようこそメッセージ） ---
+# --- 参加時 ---
 @bot.event
 async def on_member_join(member):
     gid = str(member.guild.id)
@@ -42,7 +40,7 @@ async def on_member_join(member):
             await channel.send(embed=embed)
 
 
-# --- サーバー退出時（さよならメッセージ & ログ） ---
+# --- 退出時 ---
 @bot.event
 async def on_member_remove(member):
     gid = str(member.guild.id)
@@ -64,45 +62,37 @@ async def on_member_remove(member):
             embed.set_footer(text="📤 Disconnected by black_ルアン")
             await by_channel.send(embed=embed)
 
-    log_id = guild_config.get(gid, {}).get("log")
-    if log_id:
-        log_channel = member.guild.get_channel(log_id)
-        if log_channel:
-            embed = discord.Embed(title="🔴 メンバー退出", color=discord.Color.red())
-            embed.add_field(name="名前", value=f"{member}", inline=True)
-            embed.add_field(name="ユーザーID", value=f"`{member.id}`", inline=True)
-            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-            await log_channel.send(embed=embed)
 
-
-# --- 設定コマンド（管理者専用） ---
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setchannel(ctx, ctype: str, channel: discord.TextChannel):
-    """
-    !setchannel welcome #チャンネル
-    !setchannel bye #チャンネル
-    !setchannel log #チャンネル
-    """
-    gid = str(ctx.guild.id)
+# --- スラッシュコマンド版 setchannel ---
+@bot.tree.command(name="setchannel", description="サーバーのメッセージ送信チャンネルを設定します（管理者専用）")
+@app_commands.describe(
+    ctype="welcome / bye / log のどれを設定するか",
+    channel="設定するテキストチャンネル"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def setchannel(interaction: discord.Interaction, ctype: str, channel: discord.TextChannel):
+    gid = str(interaction.guild.id)
     if gid not in guild_config:
         guild_config[gid] = {}
 
     if ctype not in ["welcome", "bye", "log"]:
-        return await ctx.send("❌ 設定できるのは `welcome` / `bye` / `log` です。")
+        return await interaction.response.send_message("❌ 設定できるのは `welcome` / `bye` / `log` です。", ephemeral=True)
 
     guild_config[gid][ctype] = channel.id
     save_config(guild_config)
 
-    await ctx.send(f"✅ {ctype} チャンネルを {channel.mention} に設定しました！")
+    await interaction.response.send_message(
+        f"✅ {ctype} チャンネルを {channel.mention} に設定しました！",
+        ephemeral=True
+    )
 
 
 # --- 起動 ---
 @bot.event
 async def on_ready():
+    await bot.tree.sync()  # スラッシュコマンド同期
     print(f"✅ ログイン成功: {bot.user} (ID: {bot.user.id})")
-    print("------")
 
-# Render 用 TOKEN
+
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 bot.run(TOKEN)
