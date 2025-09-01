@@ -1,12 +1,11 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
 import json
 
 CONFIG_FILE = "guild_config.json"
 
-# ===== 設定ファイルの読み書き =====
+# --- 設定を保存・読み込みする関数 ---
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -19,114 +18,91 @@ def save_config(data):
 
 guild_config = load_config()
 
-# ===== Bot 初期化 =====
+# --- Discord BOT ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-GUILD_ID = int(os.getenv("GUILD_ID", 0))  # 開発用サーバーに限定して同期可
 
-# ===== 起動時処理 =====
+# --- サーバー参加時（ようこそメッセージ） ---
 @bot.event
-async def on_ready():
-    print(f"✅ ログイン成功: {bot.user}")
-    try:
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)  # 特定サーバーに同期
-            print(f"✅ {len(synced)} 個のスラッシュコマンドを {guild.id} に同期しました")
-        else:
-            synced = await bot.tree.sync()  # 全サーバーに同期（時間かかる）
-            print(f"✅ {len(synced)} 個のスラッシュコマンドをグローバルに同期しました")
-    except Exception as e:
-        print(f"❌ スラッシュコマンド同期失敗: {e}")
-
-# ====== スラッシュコマンド ======
-
-# 🎉 入退室チャンネル設定
-@bot.tree.command(name="set_welcome", description="入室メッセージを送るチャンネルを設定します")
-@app_commands.describe(channel="入室メッセージを送るチャンネル")
-async def set_welcome(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    if gid not in guild_config:
-        guild_config[gid] = {}
-    guild_config[gid]["welcome"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 入室チャンネルを {channel.mention} に設定しました！", ephemeral=True)
-
-@bot.tree.command(name="set_bye", description="退室メッセージを送るチャンネルを設定します")
-@app_commands.describe(channel="退室メッセージを送るチャンネル")
-async def set_bye(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    if gid not in guild_config:
-        guild_config[gid] = {}
-    guild_config[gid]["bye"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ 退室チャンネルを {channel.mention} に設定しました！", ephemeral=True)
-
-@bot.tree.command(name="set_log", description="ログを送るチャンネルを設定します")
-@app_commands.describe(channel="ログを送るチャンネル")
-async def set_log(interaction: discord.Interaction, channel: discord.TextChannel):
-    gid = str(interaction.guild.id)
-    if gid not in guild_config:
-        guild_config[gid] = {}
-    guild_config[gid]["log"] = channel.id
-    save_config(guild_config)
-    await interaction.response.send_message(f"✅ ログチャンネルを {channel.mention} に設定しました！", ephemeral=True)
-
-# 🔍 設定確認
-@bot.tree.command(name="show_config", description="このサーバーの設定を表示します")
-async def show_config(interaction: discord.Interaction):
-    gid = str(interaction.guild.id)
-    config = guild_config.get(gid, {})
-    if not config:
-        await interaction.response.send_message("⚠️ このサーバーにはまだ設定がありません。", ephemeral=True)
-        return
-
-    welcome = f"<#{config['welcome']}>" if "welcome" in config else "未設定"
-    bye = f"<#{config['bye']}>" if "bye" in config else "未設定"
-    log = f"<#{config['log']}>" if "log" in config else "未設定"
-
-    embed = discord.Embed(title=f"🛠 サーバー設定 ({interaction.guild.name})", color=0x00BFFF)
-    embed.add_field(name="🎉 入室チャンネル", value=welcome, inline=False)
-    embed.add_field(name="👋 退室チャンネル", value=bye, inline=False)
-    embed.add_field(name="📜 ログチャンネル", value=log, inline=False)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-# ====== イベント処理 ======
-@bot.event
-async def on_member_join(member: discord.Member):
+async def on_member_join(member):
     gid = str(member.guild.id)
     ch_id = guild_config.get(gid, {}).get("welcome")
     if ch_id:
-        ch = member.guild.get_channel(ch_id)
-        if ch:
+        channel = member.guild.get_channel(ch_id)
+        if channel:
             embed = discord.Embed(
                 title="🎉 ようこそ！",
                 description=f"{member.mention} さんがサーバーに参加しました！",
-                color=0x00FF00
+                color=discord.Color.green()
             )
-            await ch.send(embed=embed)
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            await channel.send(embed=embed)
 
+
+# --- サーバー退出時（さよならメッセージ & ログ） ---
 @bot.event
-async def on_member_remove(member: discord.Member):
+async def on_member_remove(member):
     gid = str(member.guild.id)
     ch_id = guild_config.get(gid, {}).get("bye")
     if ch_id:
-        ch = member.guild.get_channel(ch_id)
-        if ch:
+        by_channel = member.guild.get_channel(ch_id)
+        if by_channel:
             embed = discord.Embed(
-                title="👋 さようなら",
-                description=f"{member.name} さんがサーバーを退出しました。",
-                color=0xFF0000
+                title="📡 ユーザーがログアウトしました。",
+                description=(
+                    f"`{member.display_name}` がサーバーを退出しました。\n\n"
+                    f"**表示名**： `{member.display_name}`\n"
+                    f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"
+                ),
+                color=discord.Color.red()
             )
-            await ch.send(embed=embed)
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            embed.set_image(url="https://media.tenor.com/_1HZ7ZDKazUAAAAd/disconnected-signal.gif")
+            embed.set_footer(text="📤 Disconnected by black_ルアン")
+            await by_channel.send(embed=embed)
 
-# ====== 実行 ======
-if __name__ == "__main__":
-    TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
-    if not TOKEN:
-        raise ValueError("❌ 環境変数に BOT_TOKEN が設定されていません。Render ダッシュボードで追加してください。")
-    bot.run(TOKEN)
+    log_id = guild_config.get(gid, {}).get("log")
+    if log_id:
+        log_channel = member.guild.get_channel(log_id)
+        if log_channel:
+            embed = discord.Embed(title="🔴 メンバー退出", color=discord.Color.red())
+            embed.add_field(name="名前", value=f"{member}", inline=True)
+            embed.add_field(name="ユーザーID", value=f"`{member.id}`", inline=True)
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            await log_channel.send(embed=embed)
+
+
+# --- 設定コマンド（管理者専用） ---
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setchannel(ctx, ctype: str, channel: discord.TextChannel):
+    """
+    !setchannel welcome #チャンネル
+    !setchannel bye #チャンネル
+    !setchannel log #チャンネル
+    """
+    gid = str(ctx.guild.id)
+    if gid not in guild_config:
+        guild_config[gid] = {}
+
+    if ctype not in ["welcome", "bye", "log"]:
+        return await ctx.send("❌ 設定できるのは `welcome` / `bye` / `log` です。")
+
+    guild_config[gid][ctype] = channel.id
+    save_config(guild_config)
+
+    await ctx.send(f"✅ {ctype} チャンネルを {channel.mention} に設定しました！")
+
+
+# --- 起動 ---
+@bot.event
+async def on_ready():
+    print(f"✅ ログイン成功: {bot.user} (ID: {bot.user.id})")
+    print("------")
+
+# Render 用 TOKEN
+TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
+bot.run(TOKEN)
