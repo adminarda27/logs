@@ -5,132 +5,162 @@ import os
 import json
 
 CONFIG_FILE = "guild_config.json"
+WARN_FILE = "warnings.json"
 
 # --- 設定ファイル読み込み ---
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
+def load_json(file):
+    if not os.path.exists(file):
         return {}
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+    with open(file, "r", encoding="utf-8") as f:
         return json.load(f)
 
 # --- 設定ファイル保存 ---
-def save_config(data):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+def save_json(file, data):
+    with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-guild_config = load_config()
+guild_config = load_json(CONFIG_FILE)
+warnings = load_json(WARN_FILE)
 
 # --- Bot 初期化 ---
 intents = discord.Intents.default()
 intents.members = True
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# --- 参加時 ---
-@bot.event
-async def on_member_join(member):
+# --- 言語メッセージ定義 ---
+LANGS = {
+    "ja": {
+        "ngword": "⚠️ {user} 禁止ワードが含まれています！（警告 {count}/3）",
+        "invite": "🚫 招待リンクは禁止されています！（警告 {count}/3）",
+        "mention": "⚠️ {user} メンションスパムは禁止です！（警告 {count}/3）",
+        "spam": "⛔ {user} がスパム行為を行いました！（警告 {count}/3）",
+        "warn": "⚠️ {user} に警告を与えました！（理由: {reason}） 警告数: {count}",
+        "ban": "⛔ {user} をBANしました（警告3回）"
+    },
+    "tr": {
+        "ngword": "⚠️ {user} yasaklı kelime kullandı! (Uyarı {count}/3)",
+        "invite": "🚫 Davet linkleri yasaktır! (Uyarı {count}/3)",
+        "mention": "⚠️ {user} aşırı etiketleme yaptı! (Uyarı {count}/3)",
+        "spam": "⛔ {user} spam yaptı! (Uyarı {count}/3)",
+        "warn": "⚠️ {user} uyarıldı! (Sebep: {reason}) Uyarı sayısı: {count}",
+        "ban": "⛔ {user} 3 uyarı aldığı için sunucudan yasaklandı."
+    }
+}
+
+def get_lang(guild_id: int):
+    gid = str(guild_id)
+    return guild_config.get(gid, {}).get("lang", "ja")
+
+
+# --- 警告処理 ---
+async def give_warning(member: discord.Member, reason: str, lang: str):
     gid = str(member.guild.id)
+    uid = str(member.id)
 
-    # 自動ロール付与
-    role_id = guild_config.get(gid, {}).get("autorole")
-    if role_id:
-        role = member.guild.get_role(role_id)
-        if role:
-            try:
-                await member.add_roles(role, reason="自動付与設定")
-            except discord.Forbidden:
-                print(f"⚠️ {role.name} を {member} に付与できません（権限不足）")
+    if gid not in warnings:
+        warnings[gid] = {}
+    warnings[gid][uid] = warnings[gid].get(uid, 0) + 1
+    count = warnings[gid][uid]
+    save_json(WARN_FILE, warnings)
 
-    # ウェルカムメッセージ
-    ch_id = guild_config.get(gid, {}).get("welcome")
-    if ch_id:
-        channel = member.guild.get_channel(ch_id)
-        if channel:
-            embed = discord.Embed(
-                title="🎉 ようこそ！",
-                description=f"{member.mention} さんがサーバーに参加しました！",
-                color=discord.Color.green()
-            )
-            avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
-            embed.set_thumbnail(url=avatar_url)
-            await channel.send(embed=embed)
+    # BAN判定
+    if count >= 3:
+        try:
+            await member.ban(reason="警告3回")
+            return LANGS[lang]["ban"].format(user=member.mention)
+        except discord.Forbidden:
+            return "❌ BANできません（権限不足）"
+    else:
+        return LANGS[lang][reason].format(user=member.mention, count=count)
 
 
-# --- 退出時 ---
+# --- NGワードリスト ---
+NG_WORDS = ["küfür", "spam", "amk", "anan", "荒らし", "死ね"]
+
+
+# --- メッセージ監視イベント ---
 @bot.event
-async def on_member_remove(member):
-    gid = str(member.guild.id)
-    ch_id = guild_config.get(gid, {}).get("bye")
-    if ch_id:
-        by_channel = member.guild.get_channel(ch_id)
-        if by_channel:
-            embed = discord.Embed(
-                title="📡 ユーザーがログアウトしました。",
-                description=(
-                    f"`{member.display_name}` がサーバーを退出しました。\n\n"
-                    f"**表示名**： `{member.display_name}`\n"
-                    f"🔗 **ユーザータグ**： `{member.name}#{member.discriminator}`"
-                ),
-                color=discord.Color.red()
-            )
-            avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
-            embed.set_thumbnail(url=avatar_url)
-            embed.set_image(url="https://media.tenor.com/_1HZ7ZDKazUAAAAd/disconnected-signal.gif")
-            embed.set_footer(text="📤 Disconnected by black_ルアン")
-            await by_channel.send(embed=embed)
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+
+    lang = get_lang(message.guild.id)
+
+    # NGワード
+    for word in NG_WORDS:
+        if word in message.content.lower():
+            await message.delete()
+            msg = await give_warning(message.author, "ngword", lang)
+            await message.channel.send(msg, delete_after=5)
+            return
+
+    # 招待リンク
+    if "discord.gg/" in message.content:
+        await message.delete()
+        msg = await give_warning(message.author, "invite", lang)
+        await message.channel.send(msg, delete_after=5)
+        return
+
+    # 大量メンション
+    if len(message.mentions) >= 5 or message.mention_everyone:
+        await message.delete()
+        msg = await give_warning(message.author, "mention", lang)
+        await message.channel.send(msg, delete_after=5)
+        return
+
+    # スパム検知（5秒間に5メッセージ以上）
+    now = discord.utils.utcnow().timestamp()
+    uid = message.author.id
+    if not hasattr(bot, "msg_log"):
+        bot.msg_log = {}
+    if uid not in bot.msg_log:
+        bot.msg_log[uid] = []
+    bot.msg_log[uid] = [t for t in bot.msg_log[uid] if now - t < 5]
+    bot.msg_log[uid].append(now)
+
+    if len(bot.msg_log[uid]) > 5:
+        msg = await give_warning(message.author, "spam", lang)
+        await message.channel.send(msg, delete_after=5)
+        return
+
+    await bot.process_commands(message)
 
 
-# --- スラッシュコマンド: チャンネル設定 ---
-@bot.tree.command(name="setchannel", description="サーバーのメッセージ送信チャンネルを設定します（管理者専用）")
-@app_commands.describe(
-    ctype="welcome / bye / log のどれを設定するか",
-    channel="設定するテキストチャンネル"
-)
+# --- スラッシュコマンド: 言語設定 ---
+@bot.tree.command(name="setlang", description="サーバーの言語を設定します（ja / tr）")
 @app_commands.checks.has_permissions(administrator=True)
-async def setchannel(interaction: discord.Interaction, ctype: str, channel: discord.TextChannel):
+async def setlang(interaction: discord.Interaction, lang: str):
+    if lang not in LANGS:
+        return await interaction.response.send_message("❌ 言語は `ja` または `tr` を指定してください。", ephemeral=True)
+
     gid = str(interaction.guild.id)
     if gid not in guild_config:
         guild_config[gid] = {}
+    guild_config[gid]["lang"] = lang
+    save_json(CONFIG_FILE, guild_config)
 
-    if ctype not in ["welcome", "bye", "log"]:
-        return await interaction.response.send_message("❌ 設定できるのは `welcome` / `bye` / `log` です。", ephemeral=True)
-
-    guild_config[gid][ctype] = channel.id
-    save_config(guild_config)
-
-    await interaction.response.send_message(
-        f"✅ {ctype} チャンネルを {channel.mention} に設定しました！",
-        ephemeral=True
-    )
+    await interaction.response.send_message(f"✅ サーバーの言語を `{lang}` に設定しました！", ephemeral=True)
 
 
-# --- スラッシュコマンド: 自動ロール設定 ---
-@bot.tree.command(name="setrole", description="自動で付与するロールを設定します（管理者専用）")
-@app_commands.describe(
-    role="新規参加者に自動で付与するロール"
-)
-@app_commands.checks.has_permissions(administrator=True)
-async def setrole(interaction: discord.Interaction, role: discord.Role):
-    gid = str(interaction.guild.id)
-    if gid not in guild_config:
-        guild_config[gid] = {}
-
-    guild_config[gid]["autorole"] = role.id
-    save_config(guild_config)
-
-    await interaction.response.send_message(
-        f"✅ 新規参加者に `{role.name}` を自動付与するよう設定しました！",
-        ephemeral=True
-    )
+# --- スラッシュコマンド: 警告付与（手動） ---
+@bot.tree.command(name="warn", description="ユーザーに警告を与えます（管理者専用）")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "なし"):
+    lang = get_lang(interaction.guild.id)
+    msg = await give_warning(member, "warn", lang)
+    await interaction.response.send_message(msg)
 
 
-# --- 起動 ---
+# --- 起動イベント ---
 @bot.event
 async def on_ready():
-    await bot.tree.sync()  # スラッシュコマンド同期
+    await bot.tree.sync()
     print(f"✅ ログイン成功: {bot.user} (ID: {bot.user.id})")
 
 
+# --- 実行 ---
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOTトークンが環境変数に設定されていません。")
